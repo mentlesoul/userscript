@@ -2,23 +2,20 @@
 // @name            Raw Manga Assistant
 // @name:zh         漫画生肉网站助手
 // @namespace       https://github.com/jc3213/userscript
-// @version         1.7.11
+// @version         1.8.4
 // @description     Assistant for raw manga online website
 // @description:zh  漫画生肉网站助手脚本
 // @author          jc3213
-// @match           *://mangameta.com/*
-// @match           *://mangagohan.me/*
+// @match           *://mangaraw.ru/*
 // @match           *://klmanga.net/*
 // @match           *://rawdevart.com/*
 // @match           *://weloma.art/*
-// @match           *://nikaraw.com/*
-// @match           *://ney5.xyz/*
 // @match           *://mangahatachi.com/*
 // @connect         *
 // @require         https://raw.githubusercontent.com/jc3213/jslib/7d4380aa6dfc2fcc830791497fb3dc959cf3e49d/ui/menu.js#sha256-/1vgY/GegKrXhrdVf0ttWNavDrD5WyqgbAMMt7MK4SM=
 // @require         https://raw.githubusercontent.com/jc3213/jslib/main/ui/dragdrop.js#sha256-cC3r27zz33gEpm1Esdzlxiw3pshWSINZbJ6TohfyFpo=
-// @require         https://raw.githubusercontent.com/jc3213/jslib/main/ui/notify.js#sha256-i/70OyNApw1FzPnn8N71FJYz07l2Yn7lecjoljhGGHE=
-// @require         https://raw.githubusercontent.com/jc3213/jslib/main/js/aria2.js#sha256-BBoId7zWSYryl5klQYG2HHenzbLyIoejdTBy0ezNDPI=
+// @require         https://raw.githubusercontent.com/jc3213/jslib/26bdf18ec342013e1bdb27c20bd7633859d9cc72/ui/notify.js#sha256-7be5JjqTLPgG4In14VPg/1ZRxaAMg8uADYBd3mtSmsY=
+// @require         https://raw.githubusercontent.com/jc3213/jslib/4221499b1b97992c9bce74122a4fe54435dbab59/js/aria2.js#sha256-ec7cbh5Q0xlLUETJEtPJCV2PvqFATCREK5/mtPFOA4Q=
 // @grant           GM_setValue
 // @grant           GM_getValue
 // @grant           GM_xmlhttpRequest
@@ -32,30 +29,18 @@
 // @webRequest      {"selector": "*.disqus.com/*", "action": "cancel"}
 // @webRequest      {"selector": "*.facebook.net/*", "action": "cancel"}
 // @webRequest      {"selector": "*.sharethis.com/*", "action": "cancel"}
-// @                nakaraw.com / rawdevart.com
-// @webRequest      {"selector": "*.exdynsrv.com/*", "action": "cancel"}
-// @                mangameta.com / nikaraw.com
-// @webRequest      {"selector": "*.realsrv.com/*", "action": "cancel"}
-// @                mangameta.com / klmanga.net
+// @                klmanga.net
 // @webRequest      {"selector": "*.wpadmngr.com/*", "action": "cancel"}
-// @                mangameta.com
-// @webRequest      {"selector": "*.com/*/47871", "action": "cancel"}
-// @webRequest      {"selector": "*.com/*/51016", "action": "cancel"}
-// @                mangagohan.me
-// @webRequest      {"selector": "*b7om8bdayac6at.com/*", "action": "cancel"}
-// @webRequest      {"selector": "*ietyofedinj89yewtburgh.com/*", "action": "cancel"}
-// @                nikaraw.com
-// @webRequest      {"selector": "*puturebraving.com/*", "action": "cancel"}
-// @webRequest      {"selector": "*.4dsply.com/*", "action": "cancel"}
-// @webRequest      {"selector": "*begasuthy.com/*", "action": "cancel"}
-// @webRequest      {"selector": "*twazzyoidwlfe.com/*", "action": "cancel"}
+// @webRequest      {"selector": "*anciengoddize.com/*", "action": "cancel"}
+// @webRequest      {"selector": "*gheraosonger.com/*", "action": "cancel"}
+// @webRequest      {"selector": {"include":"*://*.*.com/*.js", "exclude": null}, "action": "cancel"}
 // @                rawdevart.com
 // @webRequest      {"selector": "*.vdo.ai/*", "action": "cancel"}
-// @                klmanga.net
-// @webRequest      {"selector": "*.com/*50133", "action": "cancel"}
-// @webRequest      {"selector": "*educedsteeped.com/*", "action": "cancel"}
+// @webRequest      {"selector": "*.exdynsrv.com/*", "action": "cancel"}
 // @                weloma.art
 // @webRequest      {"selector": "*.com/*52076", "action": "cancel"}
+// @                mangaraw.ru
+// @webRequest      {"selector": "*saimifoa.net/*", "action": "cancel"}
 // @                mangahatachi.com
 // @webRequest      {"selector": "*sinmgaepu3or9a61w.com/*", "action": "cancel"}
 // ==/UserScript==
@@ -64,7 +49,6 @@
 // Initial variables
 var urls = [];
 var fail = [];
-var logo = [];
 var observer;
 var images;
 var watching;
@@ -75,7 +59,7 @@ var folder;
 var warning;
 var headers = {'cookie': document.cookie, 'referer': location.href, 'user-agent': navigator.userAgent};
 var jsMenu = new FlexMenu();
-var jsNotify = new Notify();
+var jsNotify = new SimpleNotify();
 
 // i18n strings and labels
 var message = {
@@ -144,22 +128,13 @@ var i18n = message[navigator.language] ?? message['en-US'];
 
 // Supported sites
 var manga = {
-    'mangameta.com': {
-        image: 'div.chapter-c > img',
-        title: {reg: /^(.+)(!?\s-\sRAW\s-)\sChapter\s([^\s]+)/, sel: 'a.chapter-title', attr: 'title', tl: 1, ch: 3},
-        shortcut: ['a#prev_chap', 'a#next_chap']
-    },
-    'mangagohan.me': {
-        image: 'div.page-break > img',
-        lazyload: 'data-src',
-        title: {reg: /^(.+)\s-\s\u7b2c(.+)\u8a71/, sel: 'meta[property="og:title"]', attr: 'content', tl: 1, ch: 2}
-    },
     'klmanga.net': {
         image: 'img.chapter-img',
         lazyload: 'data-aload',
         title: {reg: /^(.+)\sChapter\s([^\s]+)/, sel: 'li.current > a', attr: 'title', tl: 1, ch: 2},
         shortcut: ['a.btn.btn-info.prev', 'a.btn.btn-info.next'],
-        ads: ['center > a > img']
+        ads: ['center > a > img'],
+        logo: [-1]
     },
     'rawdevart.com': {
         image: '#img-container > div > img',
@@ -172,20 +147,14 @@ var manga = {
         title: {reg: /^(.+)(!?\s-\sRAW)?\sChapter\s([^\s]+)/, sel: 'img.chapter-img', attr: 'alt', tl: 1, ch: 3},
         shortcut: ['a.btn.btn-info.prev', 'a.btn.btn-info.next']
     },
-    'nikaraw.com': {
-        image: 'div.chapter-c > img',
+    'mangaraw.ru': {
+        image: 'div.card-wrap > img',
         lazyload: 'data-src',
-        title: [{reg: /^([^(])+/, sel: '#header-bot li:nth-child(2) a', attr: 'title', nl: 0}, {reg: /([^\s]+)$/, sel: '#header-bot li:nth-child(3) a', attr: 'title', nl: 0}],
-        shortcut: ['#prev_chap', '#next_chap'],
-        ads: ['div[style*="z-index: 300000;"]', 'div[style*="float: left;"]']
+        title: {reg: /^(.+)\s\u2013\s\u3010\u7b2c(.+)\u8a71\u3011/, sel: 'img[data-ll-status]', attr: 'alt', tl: 1, ch: 2},
+        shortcut: 'div.chapter-select > div > a'
     },
     'mangahatachi.com': {
         image: 'div.page-break > img',
-    },
-    'ney5.xyz': {
-        image: 'img.chapter-img',
-        title: {reg: /^(.+)(!?\s-\sRAW)?\sChapter\s([^\s]+)/, sel: 'img.chapter-img', attr: 'alt', tl: 1, ch: 3},
-        shortcut: ['a.btn.btn-info.prev', 'a.btn.btn-info.next']
     }
 };
 watching = manga[location.host];
@@ -341,12 +310,12 @@ if (watching) {
     if (watching.ads) {
         removeAdsElement();
     }
-    images = document.querySelectorAll(watching.image);
+    images = [...document.querySelectorAll(watching.image)];
     if (images.length > 0) {
         extractImage();
-        if (watching.shortcut) {
-            appendShortcuts();
-        }
+    }
+    if (watching.shortcut) {
+        appendShortcuts();
     }
 }
 
@@ -362,7 +331,7 @@ function extractImage() {
     warning = notification('extract', 'start');
     downMenu.style.display = 'block';
     observer = setInterval(() => {
-        if (images.length === urls.length + fail.length + logo.length) {
+        if (images.length === urls.length + fail.length) {
             warning.remove();
             clearInterval(observer);
             if (fail.length === 0) {
@@ -373,14 +342,17 @@ function extractImage() {
             }
         }
     }, 250);
+    if (watching.logo) {
+        watching.logo.forEach(el => {
+            var pos = el >= 0 ? el: images.length + el;
+            images[pos].remove();
+            images.splice(pos, 1);
+        });
+    }
     images.forEach((element, index) => {
         var src = element.getAttribute(watching.lazyload) ?? element.getAttribute('src');
         var url = src.trim().replace(/^\/\//, 'http://');
-        if (watching.logo && watching.logo.includes(url)) {
-            logo.push(url);
-            element.remove();
-        }
-        else if (watching.fallback && watching.fallback.includes(url)) {
+        if (watching.fallback && watching.fallback.includes(url)) {
             new MutationObserver(mutation => {
                 mutation.forEach(event => {
                     if (event.attributeName === 'src') {
@@ -407,7 +379,9 @@ function appendShortcuts() {
     document.addEventListener('keydown', event => {
         var index = ['ArrowLeft', 'ArrowRight'].indexOf(event.key);
         var shortcut = button[index];
-        shortcut && shortcut.click();
+        if (shortcut) {
+            shortcut.click();
+        }
     });
 }
 
@@ -416,5 +390,5 @@ function notification(action, status, url) {
     var warn = i18n[action][status] ?? i18n[action];
     var message = '⚠️ ' + warn.replace('%n%', images.length);
     var caution = document.createElement('div');
-    return jsNotify.popup({message});
+    return jsNotify.popup({message, timeout: 5000});
 }

@@ -1,119 +1,58 @@
 // ==UserScript==
 // @name         Nyaa Torrent Helper
 // @namespace    https://github.com/jc3213/userscript
-// @version      0.7.4
-// @description  Nyaa Torrent right click to open available open preview in new tab
+// @version      0.8.5
+// @description  Nyaa Torrent easy preview, batch export, better filter
 // @author       jc3213
-// @connect      *
-// @match        *://*.nyaa.si/*
-// @exclude      *://*.nyaa.si/view/*
+// @match        https://*.nyaa.si/*
 // @grant        GM_openInTab
+// @grant        GM_webRequest
+// @webRequest   {"selector": "*://*.realsrv.com/*", "action": "cancel"}
 // ==/UserScript==
 
-'use strict';
-// Variables
-var queue = [];
-var keyword = '';
-var filter = [];
-var action = {};
+if (location.pathname.startsWith('/view/')) {
+    return;
+}
 
-// i18n Strings
+var torrents = {};
+var working = {};
+
+// UI
+var keyword;
+var filter = [];
 var messages = {
     'en-US': {
         keyword: 'Keyword...',
         name: 'Name',
         preview: 'Preview',
         torrent: 'Torrent',
-        magnet: 'Magnet',
-        copy: 'Copy'
+        magnet: 'Magnet'
     },
     'zh-CN': {
         keyword: '关键词...',
         name: '名字',
         preview: '预览',
         torrent: '种子',
-        magnet: '磁链',
-        copy: '复制'
+        magnet: '磁链'
     }
 };
 var i18n = messages[navigator.language] ?? messages['en-US'];
 
-if (['502 Bad Gateway', '429 Too Many Requests'].includes(document.title)) {
-    setTimeout(() => location.reload(), 5000);
-}
-
-// Shortcut
-document.addEventListener('keydown', event => {
-    if (event.key === 'ArrowLeft') {
-        document.querySelector('ul.pagination > li:first-child > a').click();
-    }
-    if (event.key === 'ArrowRight') {
-        document.querySelector('ul.pagination > li:last-child > a').click();
+var input = document.createElement('input');
+input.className = 'form-control search-bar';
+input.style.cssText = 'display: inline-block; width: 150px !important; margin-top: 8px; margin-left: 20px;';
+input.placeholder = i18n.keyword;
+input.addEventListener('keypress', event => {
+    if (event.key === 'Enter') {
+        button.click()
     }
 });
 
-// Extract data
-document.querySelectorAll('table > tbody > tr').forEach((tr, index) => {
-    var a = tr.querySelectorAll('td:nth-child(2) > a');
-    a = a.length === 2 ? a[1] : a[0];
-    var id = a.href.slice(a.href.lastIndexOf('/') + 1);
-    var name = a.innerText;
-    var src = a.href;
-    var size = tr.querySelector('td:nth-child(4)').innerText;
-    var link = tr.querySelectorAll('td:nth-child(3) > a');
-    var torrent = link.length === 2 ? link[0].href : '';
-    var magnet = link.length === 2 ? link[1].href : link[0].href;
-    magnet = magnet.slice(0, magnet.indexOf('&'));
-    var td = document.createElement('td');
-    td.className = 'filter-extra';
-    td.innerHTML = '<input type="checkbox" value="' + index + '"><div id="copyorremove">🛰️</div><div id="waiting">⏱️</div>';
-    td.querySelector('#copyorremove').addEventListener('click', async event => {
-        if (event.ctrlKey) {
-            tr.style.display = 'none';
-        }
-        else {
-            data = await checkPreview(queue[index]);
-            navigator.clipboard.writeText(copyInfo(data));
-        }
-    });
-    tr.appendChild(td);
-    var data = {id, name, src, size, torrent, magnet, tr, td};
-    queue[index] = data;
-    a.addEventListener('contextmenu', async event => {
-        event.preventDefault();
-        if (action[id] || document.getElementById(id)) {
-            return;
-        }
-        queue[index] = data = await checkPreview(data);
-        getPreview(data, {top: event.pageY, left: event.pageX});
-        a.style.cssText = 'color: #C33;';
-    });
-});
-
-// Helper Button
-var new_th = document.createElement('th');
-new_th.innerText = 'Helper';
-new_th.className = 'text-center';
-document.querySelector('table > thead > tr').appendChild(new_th);
-
-// Create UI
-var css= document.createElement('style');
-css.innerHTML = `.filter-text {display: inline-block; width: 170px !important; margin-top: 8px;}
-.filter-button {background-color: #056b00; margin-top: -3px;}
-.filter-extra {display: flex; gap: 3px;}
-.filter-extra > * {flex: 1; text-align: center;}
-.filter-extra > *:nth-child(n+2) {line-height: 24px;}
-.filter-extra > *:nth-child(-n+2) {cursor: pointer;}
-.filter-extra > *:first-child {height: 16px;}
-.filter-extra > *:last-child {opacity: 0; cursor: default;}
-.filter-preview {position: absolute; z-index: 3213; max-height: 800px; width: auto;}`;
-document.head.appendChild(css);
-
-var menu = document.createElement('div');
-menu.innerHTML = '<input class="form-control search-bar filter-text" placeholder="' + i18n.keyword + '" value="' + document.querySelector('#navbar form > input').value + '"><button class="btn btn-primary filter-button">🌐</button>';
-document.querySelector('#navbar').appendChild(menu);
-menu.querySelector('input').addEventListener('keypress', event => event.key === 'Enter' && menu.querySelector('button').click());
-menu.querySelector('button').addEventListener('click', event => {
+var button = document.createElement('button');
+button.className = 'btn btn-primary';
+button.style.cssText = 'margin-top: -3px;';
+button.innerText = '🕸️';
+button.addEventListener('click', event => {
     if (event.ctrlKey) {
         batchCopy();
     }
@@ -122,46 +61,34 @@ menu.querySelector('button').addEventListener('click', event => {
     }
 });
 
-function batchCopy() {
-    if (action.copy) {
-        return;
-    }
-    action.copy = true;
-    var array = [];
-    var checked = document.querySelectorAll('table > tbody > tr > td > [type="checkbox"]:checked');
-    checked.forEach(async batch => {
-        var data = queue[batch.value];
-        queue[batch.value] = data = await checkPreview(queue[batch.value]);
-        array.push(copyInfo(data));
-    });
-    var interval = setInterval(() => {
-        if (checked.length === array.length) {
-            navigator.clipboard.writeText(array.join('\n\n======================================================\n\n'));
-            clearInterval(interval);
-            action.copy = false;
-        }
-    }, 250);
-}
+var menu = document.createElement('div');
+menu.append(input, button);
 
-function copyInfo({name, size, url = '', torrent, magnet}) {
-    return i18n.name + ':\n' + name + ' (' + size + ')\n\n' + i18n.preview + ':\n' + url + '\n\n' + i18n.torrent + ':\n' + torrent + '\n\n' + i18n.magnet + ':\n' + magnet;
-}
+document.querySelector('#navbar').appendChild(menu);
 
 function filterResult() {
-    var text = menu.querySelector('input').value;
+    var text = input.value;
     if (keyword === text) {
         if (keyword === '') {
             return;
         }
-        filter.forEach(tr => { tr.style.display = tr.style.display === 'none' ? 'table-row' : 'none'; });
+        filter.forEach(tr => {
+            tr.style.display = tr.style.display === 'none' ? 'table-row' : 'none';
+        });
     }
     else if (text === '') {
-        filter.forEach(tr => { tr.style.display = 'table-row'; });
+        if (filter.length === 0) {
+            return;
+        }
+        filter.forEach(tr => {
+            tr.style.display = 'table-row';
+        });
     }
     else if (keyword !== text) {
         var keys = text.split(/[\|\/\\\+,:;\s]+/);
         filter = [];
-        queue.forEach(({name, tr}) => {
+        Object.keys(torrents).forEach(id => {
+            var {name, tr} = torrents[id];
             if (keys.filter(key => name.includes(key)).length !== keys.length) {
                 tr.style.display = 'none';
                 filter.push(tr);
@@ -174,57 +101,129 @@ function filterResult() {
     }
 }
 
-// Preview handler
-async function checkPreview(data) {
-    if (!data.type) {
-        var result = await fetchPreview(data);
-        data = {...data, ...result};
-    }
-    return data;
+async function batchCopy() {
+    var array = [...document.querySelectorAll('td > input:checked')].map(i => getInformation(i.value));
+    var result = await Promise.all(array);
+    var text = result.join('\n\n');
+    navigator.clipboard.writeText(text);
 }
+//
 
-function fetchPreview({id, src, td}) {
-    action[id] = true;
-    td.querySelector('#waiting').style.opacity = '1.0';
-    return fetch(src).then(response => response.text()).then(text => {
-        if (text.includes('502 Bad Gateway') || text.includes('404 Not Found')) {
-            throw 'Error';
+document.addEventListener('keydown', event => {
+    if (event.key === 'ArrowLeft') {
+        document.querySelector('ul.pagination > li:first-child > a').click();
+    }
+    if (event.key === 'ArrowRight') {
+        document.querySelector('ul.pagination > li:last-child > a').click();
+    }
+});
+
+document.querySelectorAll('tbody > tr').forEach(tr => {
+    var child = tr.querySelectorAll('td');
+    var title = child[1].querySelectorAll('a');
+    title = title[title.length - 1];
+    var name = title.innerText;
+    var url = title.href;
+    var id = url.slice(url.lastIndexOf('/') + 1);
+    var dl = child[2].querySelectorAll('a');
+    var size = child[3].innerText;
+    if (dl.length === 2) {
+        var torrent = dl[0].href;
+        var magnet = dl[1].href;
+    }
+    else {
+        magnet = dl[0].href;
+    }
+    magnet = magnet.slice(0, magnet.indexOf('&'));
+    torrents[id] = {url, torrent, magnet, name, size, tr};
+    // UI
+    var td = document.createElement('td');
+    td.className = 'text-center';
+    td.style.width = '39px';
+    td.innerHTML = '<input type="checkbox" value="' + id + '">';
+    tr.appendChild(td);
+    //
+    title.addEventListener('contextmenu', async event => {
+        var {layerY, layerX, ctrlKey} = event;
+        event.preventDefault();
+        torrents[id].top = layerY;
+        torrents[id].left = layerX;
+        if (ctrlKey) {
+            var text = await getInformation(id);
+            navigator.clipboard.writeText(text);
         }
         else {
-            action[id] = false;
-            td.querySelector('#waiting').style.opacity = '0';
-            var temp = text.slice(text.indexOf('"torrent-description"') + 22);
-            var desc = temp.slice(0, temp.indexOf('</div>'));
-            var img = /https?:\/\/[^\)\]]+\.(jpg|png)/g.exec(desc);
-            if (img) {
-                return {type: 'image', url: img[0]};
-            }
-            var url = /https?:\/\/[^\*\r\n\)\]]+/g.exec(desc);
-            if (url) {
-                return {type: 'host', url: url[0]};
-            }
-            return {type: 'none'};
+            printPreview(id);
         }
-    }).catch(error => new Promise(resolve => {
-        setTimeout(() => {
-            resolve(fetchPreview({id, src, td}));
-        }, 5000);
-    }));
+    });
+});
+
+async function getInformation(id) {
+    var {site, image, name, size, torrent, magnet, url} = torrents[id];
+    var txtl = i18n.name + ':\n' + name + ' (' + size + ')';
+    var txtr = torrent ? '\n' + i18n.torrent + ':\n' + torrent + '\n' + i18n.magnet + ':\n' + magnet : '\n' + i18n.magnet + ':\n' + magnet;
+    if (image === undefined && site === undefined) {
+        var data = await getPreview(id, url);
+        site = data.site;
+        image = data.image;
+    }
+    var txtd = image ? '\n' + i18n.preview + ':\n' + image : '\n' + i18n.preview + ':\n' + site;
+    return txtl + txtd + txtr;
 }
 
-// Create preview
-function getPreview(data, mouse) {
-    data.type === 'none' ? alert(data.name + '\nNo Preview!') :
-    data.type === 'image' ? imagePreview(data, mouse) :
-    data.type === 'host' ? GM_openInTab(data.url, true) : null;
+async function printPreview(id) {
+    if (working[id]) {
+        return;
+    }
+    var {url, image, site} = torrents[id];
+    if (image) {
+        popupPreview(id, image);
+        working[id] = false;
+    }
+    else if (site) {
+        GM_openInTab(site);
+        working[id] = false;
+    }
+    else {
+        await getPreview(id, url)
+        printPreview(id);
+    }
 }
 
-function imagePreview({id, url}, {top, left}) {
-    var image = document.createElement('img');
-    image.className = 'filter-preview';
-    image.id = id;
-    image.src = url;
-    image.style.cssText = 'top: ' + top + 'px; left: ' + left + 'px;';
-    image.addEventListener('click', event => image.remove());
-    document.body.appendChild(image);
+async function getPreview(id, url) {
+    working[id] = true;
+    var res = await fetch(url);
+    var text = await res.text();
+    var idx = text.indexOf('"torrent-description"');
+    var desc = text.slice(idx + 22);
+    var ldx = desc.indexOf('</div>');
+    desc = desc.slice(0, ldx);
+    var images = desc.match(/\(https?:\/\/[^\)]+\)/g);
+    if (images) {
+        var image = images.find(url => url.match(/(jpg|png|gif|avif|bmp)\)$/));
+        image = image.slice(1, image.length - 1);
+    }
+    else {
+        var urls = desc.match(/\*\*(https?:\/\/[^\*]+)\*\*/g);
+        var site = urls[0];
+        site = site.slice(2, site.length - 2);
+    }
+    torrents[id].image = image;
+    torrents[id].site = site;
+    working[id] = false;
+    return torrents[id];
+}
+
+function popupPreview(id, image) {
+    var img = document.querySelector('#preview' + id);
+    if (img) {
+        return;
+    }
+    var {top, left} = torrents[id];
+    img = document.createElement('img');
+    img.id = 'preview' + id;
+    img.src = image;
+    img.style.cssText = 'position: absolute; z-index: 3213; max-height: 800px; width: auto; top: ' + top + 'px; left: ' + left + 'px';
+    img.addEventListener('click', event => img.remove());
+    document.body.append(img);
 }
